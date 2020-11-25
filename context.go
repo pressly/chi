@@ -90,8 +90,8 @@ type Context struct {
 	// intentionally unexported so it cant be tampered.
 	routeParams RouteParams
 
-	// methodNotAllowed hint
-	methodNotAllowed bool
+	// methodNotAllowed list of allowed methods
+	methodNotAllowed []string
 }
 
 // Reset a routing context to its initial state.
@@ -106,7 +106,7 @@ func (x *Context) Reset() {
 	x.routePattern = ""
 	x.routeParams.Keys = x.routeParams.Keys[:0]
 	x.routeParams.Values = x.routeParams.Values[:0]
-	x.methodNotAllowed = false
+	x.methodNotAllowed = nil
 }
 
 // URLParam returns the corresponding URL parameter value from the request

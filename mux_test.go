@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -456,6 +457,73 @@ func TestMuxNestedMethodNotAllowed(t *testing.T) {
 	}
 	if _, body := testRequest(t, ts, "DELETE", "/pathVar/myvar", nil); body != "pv 405" {
 		t.Fatalf(body)
+	}
+}
+
+func TestDefaultMethodNotAllowed(t *testing.T) {
+	r := NewRouter()
+	r.Get("/root", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("root"))
+	})
+
+	sr1 := NewRouter()
+	sr1.Patch("/sub1", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("sub1"))
+	})
+
+	sr2 := NewRouter()
+	sr2.Post("/sub2", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("sub2"))
+	})
+	sr2.Put("/sub2", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("patch sub2"))
+	})
+	sr2.Patch("/sub2", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("patch sub2"))
+	})
+
+	r.Mount("/prefix1", sr1)
+	r.Mount("/prefix2", sr2)
+
+	ts := httptest.NewServer(r)
+	defer ts.Close()
+
+	if _, body := testRequest(t, ts, "GET", "/root", nil); body != "root" {
+		t.Fatalf(body)
+	}
+	res, _ := testRequest(t, ts, "POST", "/root", nil)
+	if res.StatusCode != http.StatusMethodNotAllowed || res.Header.Get("Allow") != "GET" {
+		t.Fatal(res)
+	}
+
+	if _, body := testRequest(t, ts, "PATCH", "/prefix1/sub1", nil); body != "sub1" {
+		t.Fatalf(body)
+	}
+	res, _ = testRequest(t, ts, "PUT", "/prefix1/sub1", nil)
+	if res.StatusCode != http.StatusMethodNotAllowed || res.Header.Get("Allow") != "PATCH" {
+		t.Fatal(res)
+	}
+
+	if _, body := testRequest(t, ts, "POST", "/prefix2/sub2", nil); body != "sub2" {
+		t.Fatalf(body)
+	}
+	res, _ = testRequest(t, ts, "GET", "/prefix2/sub2", nil)
+	resMethods := strings.Split(res.Header.Get("Allow"), ",")
+	if res.StatusCode != http.StatusMethodNotAllowed || len(resMethods) != 3 {
+		t.Fatal(res)
+	}
+	methods := map[string]struct{}{"PATCH": struct{}{}, "POST": struct{}{}, "PUT": struct{}{}}
+	for _, m := range resMethods {
+		if _, ok := methods[m]; !ok {
+			t.Fatalf("Method %s not present in Allow header", m)
+		}
+	}
+
+	res, _ = testRequest(t, ts, "UNDEFINED", "/prefix2/sub2", nil)
+	// Allow Header should not be present
+	_, ok := res.Header["Allow"]
+	if res.StatusCode != http.StatusMethodNotAllowed || ok {
+		t.Fatal(res)
 	}
 }
 

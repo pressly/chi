@@ -44,6 +44,16 @@ var methodMap = map[string]methodTyp{
 	http.MethodTrace:   mTRACE,
 }
 
+var reversedMethodMap = reverseMethodMap(methodMap)
+
+func reverseMethodMap(m map[string]methodTyp) map[methodTyp]string {
+	reversed := make(map[methodTyp]string, len(m))
+	for k, v := range m {
+		reversed[v] = k
+	}
+	return reversed
+}
+
 // RegisterMethod adds support for custom HTTP method handlers, available
 // via Router#Method and Router#MethodFunc
 func RegisterMethod(method string) {
@@ -494,7 +504,15 @@ func (n *node) findRoute(rctx *Context, method methodTyp, path string) *node {
 
 				// flag that the routing context found a route, but not a corresponding
 				// supported method
-				rctx.methodNotAllowed = true
+				allowedMethods := make([]string, len(xn.endpoints))
+				i := 0
+				for method, mtype := range methodMap {
+					if _, ok := xn.endpoints[mtype]; ok {
+						allowedMethods[i] = method
+						i++
+					}
+				}
+				rctx.methodNotAllowed = allowedMethods
 			}
 		}
 
@@ -623,8 +641,8 @@ func (n *node) routes() []Route {
 				if h.handler == nil {
 					continue
 				}
-				m := methodTypString(mt)
-				if m == "" {
+				m, ok := reversedMethodMap[mt]
+				if !ok {
 					continue
 				}
 				hs[m] = h.handler
@@ -761,15 +779,6 @@ func longestPrefix(k1, k2 string) int {
 		}
 	}
 	return i
-}
-
-func methodTypString(method methodTyp) string {
-	for s, t := range methodMap {
-		if method == t {
-			return s
-		}
-	}
-	return ""
 }
 
 type nodes []*node
