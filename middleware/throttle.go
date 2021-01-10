@@ -21,6 +21,7 @@ type ThrottleOpts struct {
 	Limit          int
 	BacklogLimit   int
 	BacklogTimeout time.Duration
+	StatusCode     int
 	RetryAfterFn   func(ctxDone bool) time.Duration
 }
 
@@ -49,10 +50,16 @@ func ThrottleWithOpts(opts ThrottleOpts) func(http.Handler) http.Handler {
 		panic("chi/middleware: Throttle expects backlogLimit to be positive")
 	}
 
+	statusCode := opts.StatusCode
+	if statusCode == 0 {
+		statusCode = http.StatusTooManyRequests
+	}
+
 	t := throttler{
 		tokens:         make(chan token, opts.Limit),
 		backlogTokens:  make(chan token, opts.Limit+opts.BacklogLimit),
 		backlogTimeout: opts.BacklogTimeout,
+		statusCode:     statusCode,
 		retryAfterFn:   opts.RetryAfterFn,
 	}
 
@@ -72,7 +79,7 @@ func ThrottleWithOpts(opts ThrottleOpts) func(http.Handler) http.Handler {
 
 			case <-ctx.Done():
 				t.setRetryAfterHeaderIfNeeded(w, true)
-				http.Error(w, errContextCanceled, http.StatusTooManyRequests)
+				http.Error(w, errContextCanceled, t.statusCode)
 				return
 
 			case btok := <-t.backlogTokens:
@@ -85,12 +92,12 @@ func ThrottleWithOpts(opts ThrottleOpts) func(http.Handler) http.Handler {
 				select {
 				case <-timer.C:
 					t.setRetryAfterHeaderIfNeeded(w, false)
-					http.Error(w, errTimedOut, http.StatusTooManyRequests)
+					http.Error(w, errTimedOut, t.statusCode)
 					return
 				case <-ctx.Done():
 					timer.Stop()
 					t.setRetryAfterHeaderIfNeeded(w, true)
-					http.Error(w, errContextCanceled, http.StatusTooManyRequests)
+					http.Error(w, errContextCanceled, t.statusCode)
 					return
 				case tok := <-t.tokens:
 					defer func() {
@@ -103,7 +110,7 @@ func ThrottleWithOpts(opts ThrottleOpts) func(http.Handler) http.Handler {
 
 			default:
 				t.setRetryAfterHeaderIfNeeded(w, false)
-				http.Error(w, errCapacityExceeded, http.StatusTooManyRequests)
+				http.Error(w, errCapacityExceeded, t.statusCode)
 				return
 			}
 		}
@@ -120,6 +127,7 @@ type throttler struct {
 	tokens         chan token
 	backlogTokens  chan token
 	backlogTimeout time.Duration
+	statusCode     int
 	retryAfterFn   func(ctxDone bool) time.Duration
 }
 
