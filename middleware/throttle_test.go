@@ -116,7 +116,6 @@ func TestThrottleTriggerGatewayTimeout(t *testing.T) {
 			res, err := client.Get(server.URL)
 			assertNoError(t, err)
 			assertEqual(t, http.StatusOK, res.StatusCode)
-
 		}(i)
 	}
 
@@ -136,7 +135,6 @@ func TestThrottleTriggerGatewayTimeout(t *testing.T) {
 			assertNoError(t, err)
 			assertEqual(t, http.StatusTooManyRequests, res.StatusCode)
 			assertEqual(t, errTimedOut, strings.TrimSpace(string(buf)))
-
 		}(i)
 	}
 
@@ -175,7 +173,6 @@ func TestThrottleMaximum(t *testing.T) {
 			buf, err := ioutil.ReadAll(res.Body)
 			assertNoError(t, err)
 			assertEqual(t, testContent, buf)
-
 		}(i)
 	}
 
@@ -196,7 +193,6 @@ func TestThrottleMaximum(t *testing.T) {
 			assertNoError(t, err)
 			assertEqual(t, http.StatusTooManyRequests, res.StatusCode)
 			assertEqual(t, errCapacityExceeded, strings.TrimSpace(string(buf)))
-
 		}(i)
 	}
 
@@ -250,4 +246,40 @@ func TestThrottleRetryAfter(t *testing.T) {
 	}
 
 	wg.Wait()
+}
+
+func TestThrottleCustomStatusCode(t *testing.T) {
+	block := make(chan struct{})
+
+	r := chi.NewRouter()
+	r.Use(ThrottleWithOpts(ThrottleOpts{Limit: 1, StatusCode: http.StatusServiceUnavailable}))
+	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		block <- struct{}{}
+		block <- struct{}{}
+		w.Write(testContent)
+	})
+	server := httptest.NewServer(r)
+	defer server.Close()
+
+	client := http.Client{
+		Timeout: time.Second * 60, // Maximum waiting time.
+	}
+
+	done := make(chan struct{})
+
+	go func() {
+		res, err := client.Get(server.URL)
+		assertNoError(t, err)
+		assertEqual(t, http.StatusOK, res.StatusCode)
+		done <- struct{}{}
+	}()
+
+	<-block
+	res, err := client.Get(server.URL)
+	assertNoError(t, err)
+	assertEqual(t, http.StatusServiceUnavailable, res.StatusCode)
+	<-block
+
+	<-done
 }
